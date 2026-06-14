@@ -281,16 +281,16 @@ void DebuggerRenderer::render(const CPU6502& cpu, const Bus& bus,
         // Single atomic snapshot - the CPU thread is racing alongside,
         // and reading the fields one at a time produces stitched-up
         // impossible state (e.g. byte_bit_index=7 with shift_reg=$00).
-        auto s = disk.snapshot_head();
+        auto snap = disk.snapshot_head();
         std::snprintf(line, sizeof(line),
                       "  STREAM:  %02X %02X %02X [%02X] %02X %02X %02X",
-                      s.stream[0], s.stream[1], s.stream[2], s.stream[3],
-                      s.stream[4], s.stream[5], s.stream[6]);
+                      snap.stream[0], snap.stream[1], snap.stream[2], snap.stream[3],
+                      snap.stream[4], snap.stream[5], snap.stream[6]);
         draw_line(line);
         std::snprintf(line, sizeof(line),
                       "  LATCH:   $%02X   bit %d/8 of source   next-bit:[%u]",
-                      s.shift_reg, s.byte_bit_index,
-                      static_cast<unsigned>(s.next_bit));
+                      snap.shift_reg, snap.byte_bit_index,
+                      static_cast<unsigned>(snap.next_bit));
         draw_line(line);
     }
     if (!disk.mounted()) {
