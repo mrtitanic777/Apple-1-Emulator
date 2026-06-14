@@ -1,5 +1,9 @@
 # Apple-1 Emulator
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Apple-1 Emulator running, filling the screen with the power-on pattern" width="760">
+</p>
+
 A faithful Apple-1 emulator in C++. Cycle-accurate MOS 6502, Wozmon, Integer
 BASIC, real Apple Cassette Interface support — verified bit-for-bit against
 Woz's 1976 ACI ROM — plus a **read/write Disk II controller** with DOS support
