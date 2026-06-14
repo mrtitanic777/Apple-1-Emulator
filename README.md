@@ -122,9 +122,8 @@ If disk reads are unreliable on your machine (some host schedulers are
 timing-sensitive), switch **Settings → Disk II Latch** from *Bit-level* to
 *Byte-level* for deterministic timing.
 
-**Full OneDOS command reference** — booting, `CAT`, `BLOAD`/`BRUN`/`BSAVE`,
-rename/delete/format, the sysdisk menu, and the call API — is in the
-**[OneDOS User Guide](ONEDOS.md)**.
+See **[OneDOS](#onedos)** below for booting, the full command set, the sysdisk
+menu, and the calling API.
 
 ### Cassettes (ACI)
 
@@ -176,6 +175,176 @@ dialog to add a breakpoint by hex address and enable, disable, or delete
 existing ones. **F5/F6/F7** drive pause/step/step-over from the main window,
 **F8** toggles a breakpoint at the current PC, and **Clear All Breakpoints**
 removes them in one shot.
+
+## OneDOS
+
+The bundled `disks/ONEDOS.DSK` ships with **OneDOS**, a small DOS for the
+Apple-1 + Disk II contributed by Phillip Allison. It runs in the Disk-1 card's
+onboard 4K RAM (`$2000-$2FFF`), leaving all 8K of stock Apple-1 RAM
+(`$0000-$1FFF`) free for your own code. OneDOS disks are standard **DOS 3.3**
+(35 tracks × 16 sectors, 143,360 bytes, logical order) and interchange with
+real Apple II DOS 3.3 disks.
+
+### Booting OneDOS
+
+With the **Disk 1** IO card active and a disk mounted (see
+[Disks](#disks-disk-ii--dos) above), type `C100R` at WozMon's `\` prompt. The
+boot ROM loads OneDOS and you land at its prompt:
+
+```
+<
+```
+
+A fresh boot of the shipped disk drops you in the **sysdisk menu** (below); if a
+file is bootmarked (see `BM`), it auto-runs first. Any unrecognized command
+falls through to WozMon — type `2000R` to return to OneDOS.
+
+### Commands
+
+Type commands right after the `<` prompt. Filenames are **case-sensitive**, up
+to **30 characters**, with **no space** between the command and the name
+(`BLHELLO`, not `BL HELLO`). `AAAA` (address) and `LEN` (length) are 4-digit hex.
+
+| Command | What it does |
+|---|---|
+| `CAT` | List every file (paginates every 20; prints a `BYTES FREE` footer). |
+| `BLNAME` | **BLOAD** — load file at the address baked into its header. |
+| `BLNAME,AAAA,LEN` | **BLOAD override** — load `LEN` bytes into `AAAA` (relocate / partial load). |
+| `BRNAME` | **BRUN** — BLOAD then run; returns to `<` when it `RTS`es. |
+| `BSNAME,AAAA,LEN` | **BSAVE** — save `LEN` bytes from `AAAA` as binary `NAME` (4-byte header auto-prepended). |
+| `DNAME` | **DELETE** `NAME` (slot reused on the next save). |
+| `ROLD,NEW` | **RENAME** `OLD` → `NEW` (no collision check on `NEW`). |
+| `BMNAME` | **Bootmark** `NAME` as the startup file — auto-BRUN'd on the next `C100R`. |
+| `ANAME,MM,ATYPE` | Set file **type** (`MM`, 2 hex) and **auxtype**/load address (`ATYPE`, 4 hex). |
+| `I` | **FORMAT** — zero every sector + write a blank VTOC. |
+| `IS` | **INIT SYSTEM** — format, then write a bootable OneDOS image. |
+| `L` / `S` | Reserved (stubbed). |
+| *anything else* | Falls through to WozMon; `2000R` returns to OneDOS. |
+
+`CAT` lists each file as `B 002 HELLO` (type, sector count, name). The `A`
+command's type byte sets the CAT letter — `$04`/`$06` → `B` (binary), anything
+else → `?`. Example: `AHELLO2,06,1A00` marks HELLO2 as BIN and changes its load
+address to `$1A00`, so future `BLHELLO2`/`BRHELLO2` load straight there.
+
+### Typical session
+
+```
+C100R                   ; boot OneDOS
+  <CAT                  ; what's on the disk?
+   B 002 HELLO
+  <BRHELLO              ; load and run HELLO
+  HELLO FROM ONEDOS!
+  <BSPROG,1A00,40       ; save 64 bytes from $1A00 as PROG
+  <RPROG,GAME           ; rename PROG -> GAME
+  <BMGAME               ; mark GAME as the startup program
+  <                     ; reboot...
+C100R
+  GAME OUTPUT...        ; auto-runs
+  <
+```
+
+### Saving your own programs
+
+1. Enter code into RAM from WozMon (stock RAM below `$2000` is free), e.g.
+   `1A00: A2 00 BD 19 1A ...`
+2. At the OneDOS prompt: `BSMYPROG,1A00,32` (saves `$32` = 50 bytes).
+3. Run it later with `BRMYPROG`, or make it the startup with `BMMYPROG`.
+
+Programs whose load address is **below `$0B00`** would collide with OneDOS's
+working buffers, so OneDOS automatically stages them at `$1000` and copies them
+down after the read finishes — just BSAVE with the real target address. The
+stage area is `$1000-$1FFF` (4K); anything larger must be split or relocated.
+
+**Binary file format:** a 4-byte header — bytes 0–1 load address, 2–3 length —
+followed by the program bytes. `BLOAD` reads it to know where to load;
+`BLNAME,AAAA,LEN` overrides it; `BSAVE` writes it from your `,AAAA,LEN`.
+
+### Sysdisk menu
+
+A fresh `C100R` on the shipped disk lands in a bootmarked menu:
+
+```
+1) DEMOS          4) DISK CHECKER
+2) EXAMPLES       5) DISK COPIER
+3) FORMATTER      6) FILE COPIER
+                  0) EXIT TO ONEDOS
+```
+
+Pick a number to BRUN that utility; each returns to the menu, and `0` drops you
+at the `<` prompt. *Note:* DEMOS, EXAMPLES, DISK CHECKER, DISK COPIER, and FILE
+COPIER are currently stubs (they print TODO and bounce back); FORMATTER has a
+working low-level-format body, but its bit-level write timing hasn't been fully
+verified on real hardware.
+
+### Error messages
+
+The DOS 3.3 error code is written to zero page `$69` (`ERRNUM`) before the
+message prints, so a program can read it after a call.
+
+| Message | Code | Meaning |
+|---|---|---|
+| `?` | `$0B` | Syntax error — bad command, missing comma, bad hex |
+| `FILE NOT FOUND` | `$06` | No catalog entry matched the name |
+| `I/O ERROR` | `$08` | Disk read/write failed |
+| `DISK FULL` | `$09` | No free sectors for the file's T/S list or data |
+
+### Recovery
+
+If OneDOS wedges (hung, garbage, weird state), hit **RESET** (F2) and type
+`C100R`. The card's RAM is rebuilt from disk on every cold boot, so no bad state
+survives — only RAM is clobbered; the disk is untouched.
+
+<details>
+<summary><b>Calling OneDOS from your own code — jump table, zero page, memory map</b></summary>
+
+Each export is a fixed 3-byte `JMP` into the resident image, so you just `JSR`
+the entry. **C=0 on success, C=1 on error.**
+
+| Addr | Name | Description |
+|---|---|---|
+| `$2000` | `COLD` | Cold entry (boot1 lands here) |
+| `$200D` | `WARM` | Return to the `<` prompt |
+| `$2010` | `RWTSRD` | Read sector (TRACK, SECTOR, BUFPTR in ZP) |
+| `$2013` | `RWTSWR` | Write sector (TRACK, SECTOR, BUFPTR in ZP) |
+| `$2016` | `FOPEN` | Find file by name (PARSEWS, FNAMELEN) |
+| `$2019` | `FSEEK` | A = data-sector index into open file |
+| `$201C` | `FRDSEC` | Read next file data sector → SECBUF (C=1 on EOF/err) |
+| `$201F` | `FWRSEC` | Write SECBUF as next file data sector (C=1 on EOF/err) |
+| `$2022` | `RDVTOC` | Reload VTOCBUF from disk |
+| `$2025` | `FLIST` | CAT-style listing (paginates; prints BYTES FREE) |
+| `$2028` | `FREE` | Count free sectors → A (lo) + X (hi); also ZP `$6B/$6C` |
+| `$202B` | `FORMAT` | Zero-fill every sector + blank VTOC (`I`) |
+| `$202E` | `INITSYS` | FORMAT + write boot1 + OneDOS image + reserve T0/T1:S0 (`IS`) |
+| `$2031` | `BRUN` | BRUN file named in PARSEWS/FNAMELEN; returns when child RTSes |
+
+**Zero-page convention:** `$27` TRACK · `$28` SECTOR (logical) · `$29/$2A`
+BUFPTR lo/hi · `$50` TS_TRK · `$51` TS_SEC · `$5C` TSL_IDX. Buffers: `$0280`
+PARSEWS (put the filename here) · `$0300` SECBUF · `$0400` TSLBUF · `$0500`
+VTOCBUF.
+
+**OneDOS memory map:**
+
+| Range | Use |
+|---|---|
+| `$0000-$01FF` | Stack, zero page |
+| `$0200-$027F` | WozMon input buffer |
+| `$0280-$02BD` | PARSEWS / PARSEWS2 (filename parse areas) |
+| `$0300-$03FF` | SECBUF (sector buffer) |
+| `$0400-$04FF` | TSLBUF (T/S list) |
+| `$0500-$05FF` | VTOCBUF |
+| `$0800-$08FF` | boot1 |
+| `$0900-$0AFF` | write-path nibble buffers |
+| `$0B00-$1DFF` | **free for user programs** (sysdisk utilities load here) |
+| `$1E00-$1FFF` | MENU parking area (free if sysdisk MENU isn't the bootprog) |
+| `$2000-$2FFF` | OneDOS resident (16 sectors) |
+| `$C000-$C00F` | Disk II soft switches |
+| `$C100-$C1FF` | P6 boot ROM |
+| `$C200-$C2FF` | encode/skew tables (WRTAB, SKEW, INV_SKEW) |
+| `$D012-$D013` | PIA / display |
+| `$E000-$EFFF` | BASIC (if loaded) |
+| `$FF00-$FFFF` | WozMon |
+
+</details>
 
 ## File formats
 
