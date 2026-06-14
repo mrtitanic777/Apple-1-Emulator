@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // cpu6502.h - MOS 6502 CPU core.  Cycle-accurate for the timing-sensitive
 // instructions that the ACI ROM uses to decode tape; documented opcodes
 // only (no unofficial/illegal instructions; the Apple-1 firmware never uses
@@ -95,7 +99,7 @@ private:
     u8   sp_     = 0xFD;
     u16  pc_     = 0;
     u8   status_ = U | I;
-    u64  cycles_ = 0;
+    volatile u64 cycles_ = 0;
 };
 
 } // namespace apple1

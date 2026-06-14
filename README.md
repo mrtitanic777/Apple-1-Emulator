@@ -19,9 +19,12 @@ Linux, macOS, and Windows/MSYS2.
 - **Wozmon** monitor at `$FF00-$FFFF`
 - **Apple Cassette Interface (ACI)** — generate and decode real cassette WAV
   audio through Woz's original 1976 ACI ROM
-- **Disk II controller** with ONEDOS support (mount `.dsk` images)
-- **Debugger**: pause/resume, single-step, step-over-JSR, breakpoints, and a
-  register + disassembly + memory panel
+- **Read/write Disk II controller** with ONEDOS support — mount `.dsk` images,
+  and disk writes are persisted back to the file so a guest OS can save. The
+  last-used disk auto-mounts on the next launch.
+- **Debugger**: pause/resume, single-step, step-over-JSR, a register +
+  disassembly + memory panel, and a breakpoints manager dialog (add / list /
+  enable / disable / delete)
 - **CRT display effects**: scanlines, dot artifact, vignette, teletype pacing,
   and White / Green / Amber phosphor
 
@@ -128,6 +131,13 @@ Standard 140 KB Apple Disk II image, mounted via **Disk II → Mount** (F3).
 The cassette format was validated by routing a generated WAV through the real
 ACI ROM (256 bytes of Woz's 1976 assembly). All 40 bytes of HELLO WORLD
 round-trip perfectly: generated WAV → ACI ROM decode → memory.
+
+## Acknowledgments
+
+The read/write Disk II + DOS support, the debugger's breakpoints manager, and
+the application icon were contributed by **Phillip Allison**
+([@philtimmes](https://github.com/philtimmes)). See
+[CONTRIBUTORS.md](CONTRIBUTORS.md) for the full breakdown of his work.
 
 ## License
 

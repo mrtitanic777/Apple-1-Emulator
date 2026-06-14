@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // app.h - process-wide application state.  Owns all the emulator
 // components (Bus, CPU, ROMs, DisplayGrid, Debugger) plus the CPU thread
 // itself.  Lifetime spans WinMain.
@@ -15,6 +19,7 @@
 #include "roms.h"
 #include "settings.h"
 #include <atomic>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -26,7 +31,8 @@ public:
     // Construct everything (load ROMs, build the Bus, hook up callbacks,
     // start the CPU thread).  Throws on fatal init errors.
     App(const std::string& settings_path = "",
-        const std::string& roms_dir_override = "");
+        const std::string& roms_dir_override = "",
+        const std::string& debug_log_path = "");
 
     // Stop the CPU thread and join it.
     ~App();
@@ -55,6 +61,7 @@ public:
 
 private:
     void cpu_loop();
+    void dump_disk_nibbles(const std::string& path);
 
     roms::Set            rom_set_;
     std::unique_ptr<Bus>     bus_;
@@ -65,12 +72,20 @@ private:
 
     std::thread          cpu_thread_;
     std::atomic<bool>    shutdown_{false};
+
+    // --debug log: when non-empty, every CPU instruction whose PC is in
+    // $C100..$C1FF (the IO-card boot ROM window) gets a trace line written
+    // here.  Format per line: "PC  XX XX XX  DISASM  A=XX X=XX Y=XX SP=XX F=...".
+    // Only the CPU thread writes to this stream; no locking needed.
+    std::ofstream        debug_log_;
+    std::string          debug_log_path_;   // also used to derive .nib path
 };
 
 // Lazy global accessor.  Created in WinMain.
 App& app();
 void create_app(const std::string& settings_path = "",
-                const std::string& roms_dir_override = "");
+                const std::string& roms_dir_override = "",
+                const std::string& debug_log_path = "");
 void destroy_app();
 
 } // namespace apple1

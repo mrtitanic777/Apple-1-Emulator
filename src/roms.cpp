@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // roms.cpp - read .rom files from disk.
 
 #include "roms.h"
@@ -58,6 +62,23 @@ Set load_from_directory(const std::string& dir) {
             throw std::runtime_error(os.str());
         }
         set.aci = std::move(aci);
+    }
+
+    // Optional: OneDos ROM (Disk 1 IO card).  Two layouts supported:
+    //   256 bytes -> $C100-$C1FF, just the boot loader.
+    //   512 bytes -> $C100-$C1FF boot + $C200-$C2FF NIBTAB.
+    // Falls back to boot.rom for users who keep the file under its OneDos
+    // build name.
+    auto onedos = read_file_optional(d / "onedos.rom");
+    if (!onedos) onedos = read_file_optional(d / "boot.rom");
+    if (onedos) {
+        if (onedos->size() != 256 && onedos->size() != 512) {
+            std::ostringstream os;
+            os << "onedos.rom has size " << onedos->size()
+               << " (expected 256 or 512).";
+            throw std::runtime_error(os.str());
+        }
+        set.onedos = std::move(onedos);
     }
 
     // Required: character generator (2513-style 5x7 glyphs, 64 chars * 8 rows).

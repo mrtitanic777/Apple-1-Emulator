@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // roms.h - load ROM image files at startup.
 //
 // All three Apple-1 ROMs ship as separate .rom files alongside the
@@ -15,10 +19,11 @@
 namespace apple1::roms {
 
 struct Set {
-    std::vector<u8> wozmon;             // required, 256 bytes
-    std::vector<u8> chargen;            // required, 512 bytes (2513-style)
+    std::vector<u8> wozmon;               // required, 256 bytes
+    std::vector<u8> chargen;              // required, 512 bytes (2513-style)
     std::optional<std::vector<u8>> basic; // optional, 4096 bytes
     std::optional<std::vector<u8>> aci;   // optional, 256 bytes
+    std::optional<std::vector<u8>> onedos;// optional, 256 bytes (Disk 1 boot ROM)
 };
 
 // Read the three ROM images from a directory.  Returns the loaded set.
