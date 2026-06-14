@@ -1,0 +1,79 @@
+// resource.rc - menus, accelerators, and version info.
+
+#include <windows.h>
+#include "resource.h"
+
+IDR_MAIN_MENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open...\tCtrl+O",      IDM_FILE_OPEN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                  IDM_FILE_EXIT
+    END
+    POPUP "&CPU"
+    BEGIN
+        MENUITEM "&Clear Screen\tF1",      IDM_CPU_CLEAR_SCREEN
+        MENUITEM "&Reset\tF2",             IDM_CPU_RESET
+        MENUITEM SEPARATOR
+        MENUITEM "&Pause / Resume\tF5",    IDM_CPU_PAUSE
+        MENUITEM "&Step\tF6",              IDM_CPU_STEP
+        MENUITEM "Step &Over JSR\tF7",     IDM_CPU_STEP_OVER
+    END
+    POPUP "C&assette"
+    BEGIN
+        MENUITEM "&Save Memory as WAV...", IDM_CASSETTE_SAVE
+    END
+    POPUP "&Disk II"
+    BEGIN
+        MENUITEM "&Mount .dsk...\tF3",     IDM_DISK_MOUNT
+        MENUITEM "&Eject",                 IDM_DISK_EJECT
+    END
+    POPUP "&Debugger"
+    BEGIN
+        MENUITEM "Show Debugger &Window",            IDM_DEBUGGER_SHOW
+        MENUITEM SEPARATOR
+        MENUITEM "Toggle &Breakpoint at PC\tF8",     IDM_DEBUGGER_TOGGLE_BP
+        MENUITEM "&Goto Memory Address...\tF9",      IDM_DEBUGGER_GOTO_MEM
+        MENUITEM "&Clear All Breakpoints",           IDM_DEBUGGER_CLEAR_BPS
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Scale &Tiny (1x)",                 IDM_VIEW_SCALE_TINY
+        MENUITEM "Scale &Small (2x)",                IDM_VIEW_SCALE_1X
+        MENUITEM "Scale &Medium (3x)",               IDM_VIEW_SCALE_2X
+        MENUITEM "Scale &Large (5x)",                IDM_VIEW_SCALE_3X
+        MENUITEM "Scale &Huge (7x)",                 IDM_VIEW_SCALE_HUGE
+    END
+    POPUP "&Settings"
+    BEGIN
+        MENUITEM "&Scanlines",                       IDM_SETTINGS_SCANLINES
+        MENUITEM "&Dot Artifact",                    IDM_SETTINGS_DOT_ARTIFACT
+        MENUITEM "&Teletype Pacing",                 IDM_SETTINGS_TELETYPE_PACING
+        MENUITEM "&Vignette",                        IDM_SETTINGS_VIGNETTE
+        MENUITEM SEPARATOR
+        POPUP "&Phosphor"
+        BEGIN
+            MENUITEM "&White",                       IDM_SETTINGS_PHOSPHOR_WHITE
+            MENUITEM "&Green",                       IDM_SETTINGS_PHOSPHOR_GREEN
+            MENUITEM "&Amber",                       IDM_SETTINGS_PHOSPHOR_AMBER
+        END
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About...",                        IDM_HELP_ABOUT
+    END
+END
+
+IDR_MAIN_ACCEL ACCELERATORS
+BEGIN
+    "O",           IDM_FILE_OPEN,           VIRTKEY, CONTROL
+    VK_F1,         IDM_CPU_CLEAR_SCREEN,    VIRTKEY
+    VK_F2,         IDM_CPU_RESET,           VIRTKEY
+    VK_F3,         IDM_DISK_MOUNT,          VIRTKEY
+    VK_F5,         IDM_CPU_PAUSE,           VIRTKEY
+    VK_F6,         IDM_CPU_STEP,            VIRTKEY
+    VK_F7,         IDM_CPU_STEP_OVER,       VIRTKEY
+    VK_F8,         IDM_DEBUGGER_TOGGLE_BP,  VIRTKEY
+    VK_F9,         IDM_DEBUGGER_GOTO_MEM,   VIRTKEY
+END

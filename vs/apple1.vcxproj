@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{6E3A4BF2-3FC4-4F88-9F1C-1234567890AB}</ProjectGuid>
+    <RootNamespace>apple1</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)..\build\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)..\build\obj\$(Configuration)\</IntDir>
+    <TargetName>apple1</TargetName>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\src</AdditionalIncludeDirectories>
+      <ConformanceMode>true</ConformanceMode>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>d2d1.lib;dwrite.lib;comdlg32.lib;ole32.lib;user32.lib;gdi32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;UNICODE;_UNICODE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>MaxSpeed</Optimization>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\src</AdditionalIncludeDirectories>
+      <ConformanceMode>true</ConformanceMode>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>d2d1.lib;dwrite.lib;comdlg32.lib;ole32.lib;user32.lib;gdi32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="..\src\platform\windows\main.cpp" />
+    <ClCompile Include="..\src\cpu6502.cpp" />
+    <ClCompile Include="..\src\bus.cpp" />
+    <ClCompile Include="..\src\disk_ii.cpp" />
+    <ClCompile Include="..\src\display_grid.cpp" />
+    <ClCompile Include="..\src\roms.cpp" />
+    <ClCompile Include="..\src\cassette.cpp" />
+    <ClCompile Include="..\src\fileio.cpp" />
+    <ClCompile Include="..\src\disasm.cpp" />
+    <ClCompile Include="..\src\debugger.cpp" />
+    <ClCompile Include="..\src\settings.cpp" />
+    <ClCompile Include="..\src\app.cpp" />
+    <ClCompile Include="..\src\platform\windows\d2d_helpers.cpp" />
+    <ClCompile Include="..\src\platform\windows\display_renderer.cpp" />
+    <ClCompile Include="..\src\platform\windows\debugger_renderer.cpp" />
+    <ClCompile Include="..\src\platform\windows\debugger_window.cpp" />
+    <ClCompile Include="..\src\platform\windows\main_window.cpp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="..\src\common.h" />
+    <ClInclude Include="..\src\cpu6502.h" />
+    <ClInclude Include="..\src\bus.h" />
+    <ClInclude Include="..\src\disk_ii.h" />
+    <ClInclude Include="..\src\display_grid.h" />
+    <ClInclude Include="..\src\roms.h" />
+    <ClInclude Include="..\src\cassette.h" />
+    <ClInclude Include="..\src\fileio.h" />
+    <ClInclude Include="..\src\disasm.h" />
+    <ClInclude Include="..\src\debugger.h" />
+    <ClInclude Include="..\src\settings.h" />
+    <ClInclude Include="..\src\app.h" />
+    <ClInclude Include="..\src\platform\windows\d2d_helpers.h" />
+    <ClInclude Include="..\src\platform\windows\display_renderer.h" />
+    <ClInclude Include="..\src\platform\windows\debugger_renderer.h" />
+    <ClInclude Include="..\src\platform\windows\debugger_window.h" />
+    <ClInclude Include="..\src\platform\windows\main_window.h" />
+    <ClInclude Include="..\src\platform\windows\resource.h" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ResourceCompile Include="..\src\platform\windows\resource.rc" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
