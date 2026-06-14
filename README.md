@@ -2,8 +2,8 @@
 
 A faithful Apple-1 emulator in C++. Cycle-accurate MOS 6502, Wozmon, Integer
 BASIC, real Apple Cassette Interface support — verified bit-for-bit against
-Woz's 1976 ACI ROM — plus a Disk II controller and a built-in debugger with
-single-step, breakpoints, and a live memory view.
+Woz's 1976 ACI ROM — plus a **read/write Disk II controller** with DOS support
+and a built-in debugger with single-step, breakpoints, and a live memory view.
 
 The primary build is a native **Windows GUI** (Win32 + Direct2D/DirectWrite)
 with a CRT-style display. A cross-platform **SDL2** build is also included for
@@ -17,24 +17,30 @@ Linux, macOS, and Windows/MSYS2.
   BASIC depends on this)
 - **Integer BASIC** at `$E000-$EFFF` (loaded from `basic.rom`)
 - **Wozmon** monitor at `$FF00-$FFFF`
-- **Apple Cassette Interface (ACI)** — generate and decode real cassette WAV
-  audio through Woz's original 1976 ACI ROM
-- **Read/write Disk II controller** with ONEDOS support — mount `.dsk` images,
-  and disk writes are persisted back to the file so a guest OS can save. The
-  last-used disk auto-mounts on the next launch.
-- **Debugger**: pause/resume, single-step, step-over-JSR, a register +
-  disassembly + memory panel, and a breakpoints manager dialog (add / list /
-  enable / disable / delete)
-- **CRT display effects**: scanlines, dot artifact, vignette, teletype pacing,
-  and White / Green / Amber phosphor
+- **Expansion slot (one IO card at a time):**
+  - **Cassette (ACI)** — generate and decode real cassette WAV audio through
+    Woz's original 1976 ACI ROM
+  - **Disk 1 (Disk II + OneDos)** — read/write Disk II controller; disk writes
+    are persisted back to the `.dsk` file so a guest OS can actually save. The
+    last-used disk auto-mounts on the next launch.
+- **RAM expansion** — run with 8 KB (stock), 16 KB, 24 KB, or 32 KB total
+- **Debugger** — separate window with registers, flags, disassembly, a memory
+  inspector, and tape/disk diagnostics; pause/resume, single-step,
+  step-over-JSR, run-to-RTS, and a breakpoints manager (add / enable / disable /
+  delete)
+- **CRT display effects** — scanlines, dot artifact, vignette, teletype pacing,
+  White / Green / Amber phosphor, and 1x–7x window scaling
+- **Disk II latch model** — switch between cycle-accurate (per-bit) and
+  deterministic (per-byte) nibble timing
 
 ### Memory map
 
 ```
-$0000-$1FFF  RAM (8 KB on-board)
-$C000-$C00F  Disk II soft switches (when a .dsk is mounted)
-$C000-$C0FF  ACI tape data port (when no disk is mounted)
-$C100-$C1FF  ACI ROM (cassette mini-monitor)
+$0000-$1FFF  RAM (8 KB on-board; expandable up to $7FFF / 32 KB total)
+$C000-$C1FF  Expansion slot — depends on the selected IO Card:
+               Cassette : ACI registers $C000-$C0FF, ACI ROM $C100-$C1FF
+               Disk 1   : Disk II soft switches $C000-$C00F, OneDos ROM $C100-$C1FF
+               None     : unmapped
 $D000-$D0FF  PIA (keyboard + display); low 2 bits decoded -> 4 mirrored regs
 $E000-$EFFF  Integer BASIC (from basic.rom)
 $FF00-$FFFF  Wozmon
@@ -68,34 +74,103 @@ the built `apple1.exe`.
 roms/
     wozmon.rom    (256 B,  required)
     char.rom      (512 B,  required — 2513 character generator)
-    basic.rom     (4 KB,   optional — enables Integer BASIC at $E000)
-    aci.rom       (256 B,  optional — enables the ACI cassette via $C100)
-    ONEDOS.ROM    (256 B,  optional — Disk II / ONEDOS)
+    basic.rom     (4 KB,   optional — Integer BASIC at $E000)
+    aci.rom       (256 B,  optional — used by the Cassette IO card)
+    ONEDOS.ROM    (512 B,  optional — used by the Disk 1 IO card)
 ```
 
-`cassettes/` holds sample `.wav` tapes and `disks/` holds a sample `.dsk`
-image you can load.
+`cassettes/` holds sample `.wav` tapes and `disks/` holds a sample ONEDOS
+`.dsk` image.
+
+## Using the emulator
+
+When the window opens you're talking to a real Apple-1. **Just type** — input
+is uppercase ASCII like the original hardware. Press **Enter** for Wozmon's `\`
+prompt.
+
+- **Wozmon basics:** `FF00.FF1F` dumps memory; `E000R` runs whatever is at
+  `$E000` (i.e. BASIC); `addr: bytes` writes bytes.
+- **BASIC:** `E000R` then Enter. Try `PRINT 2+2`, or
+  `10 FOR I=1 TO 5 : 20 PRINT I*I : 30 NEXT I : RUN`.
+- **Reset:** **F2** jumps to Wozmon and preserves memory.
+
+### The IO card (Cassette vs. Disk)
+
+The Apple-1 had one expansion slot, and so does this emulator — pick what's in
+it under **Expansions → IO Card**:
+
+- **Cassette (default)** — the ACI cassette interface is active. Loading or
+  staging a tape, or the ACI ROM polling for one, pops a file dialog for a
+  `.wav`.
+- **Disk 1** — the OneDos boot ROM and Disk II controller are mapped. Selecting
+  this (or mounting a disk) boots OneDos; if no disk is mounted it prompts you
+  for a `.dsk`.
+- **None** — slot empty.
+
+### Disks (Disk II + DOS)
+
+1. **Disk II → Mount .dsk…** (or **F3**), or just pick **Expansions → IO Card →
+   Disk 1** and you'll be prompted for an image. Mounting a disk automatically
+   switches the IO card to Disk 1.
+2. The disk boots. **Writes are saved back to the `.dsk` file**, so files you
+   create in the guest OS persist.
+3. The last disk you mounted **auto-mounts on the next launch** (unless the
+   Cassette card is selected). **Disk II → Eject** unmounts.
+
+If disk reads are unreliable on your machine (some host schedulers are
+timing-sensitive), switch **Settings → Disk II Latch** from *Bit-level* to
+*Byte-level* for deterministic timing.
+
+### Cassettes (ACI)
+
+With the Cassette IO card selected, **Cassette → Save Memory as WAV…** prompts
+for a start and end address (hex) and writes a real ACI-format tape. To load,
+use **File → Open…** with a `.wav`, or let the ACI ROM prompt you.
 
 ## Controls
 
-The GUI is fully menu-driven; these are the keyboard shortcuts:
+### Keyboard shortcuts
 
-| Key      | Action                                    |
-|----------|-------------------------------------------|
-| Ctrl+O   | Open a file (`.txt`, `.bin`, or `.wav`)   |
-| F1       | Clear screen                              |
-| F2       | Reset (jump to Wozmon; memory preserved)  |
-| F3       | Mount a `.dsk` image (Disk II)            |
-| F5       | Debugger: pause / resume CPU              |
-| F6       | Debugger: single-step one instruction     |
-| F7       | Debugger: step over JSR                    |
-| F8       | Debugger: toggle breakpoint at PC          |
-| F9       | Debugger: goto address in memory view      |
+| Key      | Action                                              |
+|----------|-----------------------------------------------------|
+| Ctrl+O   | Open a file (`.txt`, `.bin`, or `.wav`)             |
+| F1       | Clear screen                                        |
+| F2       | Reset (jump to Wozmon; memory preserved)            |
+| F3       | Mount a `.dsk` image (Disk II)                      |
+| F5       | Debugger: pause / resume CPU                        |
+| F6       | Debugger: single-step one instruction               |
+| F7       | Debugger: step over JSR                             |
+| F8       | Toggle breakpoint at the current PC                 |
+| F9       | Goto an address in the debugger's memory view       |
 
-Additional menus cover **Cassette** (save a memory range as a WAV),
-**Disk II** (eject), **Debugger** (show window, clear breakpoints),
-**View** (display scale 1x–7x), and **Settings** (scanlines, dot artifact,
-teletype pacing, vignette, phosphor color).
+All other keys are sent to the emulated Apple-1 (uppercase ASCII; Enter = CR,
+Esc, and Ctrl-letters are passed through).
+
+### Full menu reference
+
+| Menu | Items |
+|------|-------|
+| **File** | Open… (Ctrl+O) · Exit |
+| **CPU** | Clear Screen (F1) · Reset (F2) · Pause/Resume (F5) · Step (F6) · Step Over JSR (F7) |
+| **Cassette** | Save Memory as WAV… (prompts start/end address) |
+| **Disk II** | Mount .dsk… (F3) · Eject |
+| **Debugger** | Show Debugger Window · Toggle Breakpoint at PC (F8) · Goto Memory Address… (F9) · Clear All Breakpoints |
+| **View** | Scale Tiny (1x) · Small (2x) · Medium (3x) · Large (5x) · Huge (7x) |
+| **Settings** | Scanlines · Dot Artifact · Teletype Pacing · Vignette · Phosphor ▸ White/Green/Amber · Disk II Latch ▸ Bit-level/Byte-level |
+| **Expansions** | RAM ▸ None (8KB)/8KB (16KB)/16KB (24KB)/24KB (32KB) · IO Card ▸ None/Cassette/Disk 1 |
+| **Help** | About… |
+
+## Debugger
+
+Open it with **Debugger → Show Debugger Window**. The panel shows the CPU
+registers and flags, live disassembly at the PC, a memory inspector
+(**F9** to jump it to an address), and tape/disk diagnostics. It has on-screen
+buttons to **Run Free**, enter **Step** mode, **Run to RTS**, **Step** one
+instruction, and **ADD BP…**, which opens the **breakpoints manager** — a
+dialog to add a breakpoint by hex address and enable, disable, or delete
+existing ones. **F5/F6/F7** drive pause/step/step-over from the main window,
+**F8** toggles a breakpoint at the current PC, and **Clear All Breakpoints**
+removes them in one shot.
 
 ## File formats
 
@@ -115,16 +190,9 @@ Loaded at `$0300` by default. To load at a specific address, name the file
 followed by tone-coded data bits.
 
 ### Disk image (`.dsk`)
-Standard 140 KB Apple Disk II image, mounted via **Disk II → Mount** (F3).
-
-## Quick tour
-
-1. Run `apple1.exe`. Press Enter to get Wozmon's `\` prompt.
-2. Inspect the Wozmon ROM: `FF00.FF1F`
-3. Run BASIC: `E000R`, then try `PRINT 2+2` or
-   `10 FOR I=1 TO 5 : 20 PRINT I*I : 30 NEXT I : RUN`.
-4. F2 to reset back to Wozmon.
-5. F5 to open the debugger; F6 to single-step.
+Standard 140 KB Apple Disk II image (35 tracks × 16 sectors × 256 bytes, DOS
+3.3 logical order), mounted via **Disk II → Mount** (F3). Writes are persisted
+back to the file.
 
 ## Verification
 
