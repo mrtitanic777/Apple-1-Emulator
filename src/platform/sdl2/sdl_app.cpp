@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // sdl_app.cpp - SDL2 platform shim.
 
 #include "sdl_app.h"
@@ -71,9 +75,14 @@ bool SdlApp::init() {
         return false;
     }
 
+    // No VSYNC: pace explicitly to 60Hz via steady_clock below so the
+    // emulated CPU's frame-tied work (display putc pacing, etc.) doesn't
+    // inherit the host monitor's refresh rate (75/120/144 Hz machines
+    // were giving non-deterministic disk-load behavior because CPU work
+    // got more wall-clock per frame on faster panels).
     renderer_ = SDL_CreateRenderer(
         window_, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        SDL_RENDERER_ACCELERATED);
     if (!renderer_) {
         std::fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
         return false;
@@ -395,7 +404,7 @@ void SdlApp::handle_text(const char* utf8) {
 int SdlApp::run() {
     running_ = true;
     auto last_render = std::chrono::steady_clock::now();
-    const auto frame_interval = std::chrono::milliseconds(16);  // ~60fps
+    const auto frame_interval = std::chrono::microseconds(16667);  // 60.0 Hz
 
     while (running_) {
         SDL_Event ev;
@@ -430,14 +439,17 @@ int SdlApp::run() {
             }
         }
 
-        // Render at ~60 FPS.  PRESENTVSYNC also helps cap rate.
+        // Render at exactly 60 Hz off steady_clock - no VSYNC, no
+        // monitor-rate dependency.  sleep_until gives sub-ms precision
+        // on Win10+/Linux; the busy-wait check after handles any
+        // scheduler over-sleep.
+        auto next_render = last_render + frame_interval;
         auto now = std::chrono::steady_clock::now();
-        if (now - last_render >= frame_interval) {
-            render_frame();
-            last_render = now;
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if (now < next_render) {
+            std::this_thread::sleep_until(next_render);
         }
+        render_frame();
+        last_render = std::chrono::steady_clock::now();
     }
     return 0;
 }

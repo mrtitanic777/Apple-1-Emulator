@@ -1,12 +1,31 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // bus.h - the memory bus and all I/O.  Single point of truth for which
 // address ranges go where.  Owns the RAM, exposes PIA registers for the
 // keyboard and display, hosts the ACI tape input mechanism, and holds the
 // ROM images that CPU code can read.
 //
 // Memory map (Apple-1 + emulator extensions):
-//   $0000-$1FFF  RAM (8KB on-board)
-//   $C000-$C0FF  ACI tape data port (bit-7 flip-flop)
-//   $C100-$C1FF  ACI ROM (mini-monitor for tape operations)
+//   $0000-$1FFF  RAM (8KB on-board, always present)
+//   $2000-$2FFF  Disk-1 card on-board RAM (only when io_card = Disk1).
+//                Overlays any RAM-expansion bytes in this range so that
+//                One Dos always lives at a fixed address regardless of
+//                how much expansion the user has installed.  When Disk1
+//                is *not* the active card this block is hidden and the
+//                normal RAM-expansion / unmapped behaviour applies.
+//   $2000-$7FFF  RAM expansion (0/8/16/24KB extra, see set_ram_extent).
+//                Disk1 card RAM (above) takes priority over this for
+//                the $2000-$2FFF page range.
+//   $C000-$C0FF  IO card register space (depends on io_card):
+//                  None     -> unmapped (reads 0)
+//                  Cassette -> ACI tape data port (bit-7 flip-flop)
+//                  Disk1    -> Disk II soft switches at $C000-$C00F
+//   $C100-$C1FF  IO card ROM (depends on io_card):
+//                  None     -> unmapped
+//                  Cassette -> ACI ROM (256-byte tape mini-monitor)
+//                  Disk1    -> OneDos boot ROM (256-byte Disk II boot)
 //   $D000-$D0FF  PIA (real Apple-1 only decoded low 2 bits, so all 256
 //                addresses map to one of four registers - BASIC depends on
 //                this since it reads $D0F2 instead of $D012, etc.)
@@ -18,6 +37,7 @@
 #include "common.h"
 #include "disk_ii.h"
 #include "roms.h"
+#include "settings.h"
 #include <array>
 #include <atomic>
 #include <deque>
@@ -81,11 +101,22 @@ public:
     }
 
     // Diagnostics / debugger.  RAM is exposed read-only for the debugger UI;
-    // it shouldn't write directly to RAM.
-    const std::array<u8, 0x2000>& ram() const { return ram_; }
+    // it shouldn't write directly to RAM.  Backing buffer is always 32KB so
+    // expansion changes don't reallocate; ram_extent() reports how much is
+    // currently visible to the CPU.
+    const std::array<u8, 0x8000>& ram() const { return ram_; }
+    std::size_t ram_extent() const { return ram_extent_.load(); }
     const std::vector<u8>& basic_ram() const { return basic_ram_; }
-    bool has_basic() const { return !basic_ram_.empty(); }
-    bool has_aci()   const { return !aci_rom_.empty(); }
+    bool has_basic()  const { return !basic_ram_.empty(); }
+    bool has_aci()    const { return !aci_rom_.empty(); }
+    bool has_onedos() const { return !onedos_rom_.empty(); }
+
+    // Live IO-card / RAM-expansion controls.  Both are thread-safe to
+    // poke at runtime; the CPU thread sees the new mapping on the next
+    // read/write.
+    void   set_ram_expansion(RamExpansion r);
+    void   set_io_card(IoCard c) { io_card_.store(static_cast<int>(c)); }
+    IoCard io_card() const       { return static_cast<IoCard>(io_card_.load()); }
 
     // Tape diagnostics for the debugger panel.
     u64 tape_reads()        const { return tape_reads_; }
@@ -112,6 +143,19 @@ public:
         tape_flips_ = 0;
     }
 
+    // Disk auto-prompt - mirror of the tape mechanism.  When the OneDos
+    // boot ROM polls $C00x with no image mounted, the CPU thread sets a
+    // flag the GUI thread polls and reacts to by opening a .dsk dialog.
+    // Cancelling stops re-prompting until the user explicitly selects
+    // the Disk 1 IO card again.
+    bool disk_requested() const { return disk_requested_.load(); }
+    void clear_disk_request()   { disk_requested_.store(false); }
+    void set_disk_cancelled()   { disk_cancelled_.store(true); }
+    void reset_disk_request_state() {
+        disk_requested_.store(false);
+        disk_cancelled_.store(false);
+    }
+
     // Reset PIA state - matches what a real 6820 PIA does on the /RES
     // line.  Called from App::reset_cpu so Wozmon's pre-config 0x7F poke
     // gets dropped on every reset, not just the first one.
@@ -127,8 +171,18 @@ private:
     void write_pia(u16 addr, u8 val);
     u8   read_tape();
 
-    // 8KB on-board RAM.
-    std::array<u8, 0x2000> ram_{};
+    // RAM: 8KB on-board plus up to 24KB expansion = 32KB ceiling.  Backing
+    // buffer is always sized to the ceiling so toggling expansion at runtime
+    // never reallocates underneath the CPU thread; ram_extent_ is the
+    // currently-visible byte count.
+    std::array<u8, 0x8000> ram_{};
+    std::atomic<std::size_t> ram_extent_{0x2000};
+
+    // Disk-1 card on-board RAM: 4KB at $2000-$2FFF, mapped only when
+    // the Disk-1 IO card is selected.  One Dos's resident image lives
+    // here so the stock 8KB RAM ($0000-$1FFF) stays free for user
+    // programs that BR/BL load.
+    std::array<u8, 0x1000> disk1_ram_{};
 
     // BASIC RAM (4KB at $E000-$EFFF).  We hold it in a vector for
     // flexibility; it's resized to either 0 (no BASIC) or 4096.
@@ -137,6 +191,12 @@ private:
     // Read-only ROMs.
     std::vector<u8> wozmon_rom_;
     std::vector<u8> aci_rom_;
+    std::vector<u8> onedos_rom_;     // optional Disk 1 ROM (256 = boot only at $C100-$C1FF;
+                                     // 512 = boot at $C100-$C1FF + NIBTAB at $C200-$C2FF)
+
+    // Which IO card is "plugged in".  Stored atomically because the GUI
+    // thread can flip it via the Expansions menu while the CPU runs.
+    std::atomic<int> io_card_{static_cast<int>(IoCard::Cassette)};
 
     // PIA / keyboard state.  The deque is the host-side input buffer;
     // kbd_data_ + kbd_ready_ mirror the PIA's view of "one byte at a time"
@@ -158,6 +218,8 @@ private:
     // Auto-prompt flags - set from CPU thread, read from GUI thread.
     std::atomic<bool> tape_requested_{false};
     std::atomic<bool> tape_cancelled_{false};
+    std::atomic<bool> disk_requested_{false};
+    std::atomic<bool> disk_cancelled_{false};
 
     DisplayCallback     display_cb_;
     DisplayWaitCallback display_wait_cb_;

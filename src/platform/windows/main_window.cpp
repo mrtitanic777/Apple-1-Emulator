@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // main_window.cpp - the main display window.
 
 #include "main_window.h"
@@ -20,7 +24,7 @@ const wchar_t* kClassName  = L"Apple1MainWindow";
 const wchar_t* kWindowName = L"Apple-1 Emulator";
 
 constexpr UINT_PTR kRenderTimerId = 1;
-constexpr UINT     kRenderTimerMs = 33;     // ~30 Hz
+constexpr UINT     kRenderTimerMs = 16;     // ~60 Hz (SetTimer pacing, not monitor VSYNC)
 
 // Helper: GetOpenFileName / GetSaveFileName wrappers returning UTF-8.
 std::string open_file_dialog(HWND owner, const wchar_t* filter,
@@ -189,6 +193,9 @@ bool MainWindow::create(HINSTANCE hInstance, int nCmdShow) {
     wc.hbrBackground = nullptr;       // D2D paints everything
     wc.lpszClassName = kClassName;
     wc.lpszMenuName  = MAKEINTRESOURCEW(IDR_MAIN_MENU);
+    // App icon - shown in the title bar, alt-tab list, and taskbar.
+    wc.hIcon   = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APPICON));
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APPICON));
     if (!RegisterClassExW(&wc)) return false;
 
     accel_ = LoadAcceleratorsW(hInstance, MAKEINTRESOURCEW(IDR_MAIN_ACCEL));
@@ -215,6 +222,7 @@ bool MainWindow::create(HINSTANCE hInstance, int nCmdShow) {
     timer_id_ = SetTimer(hwnd_, kRenderTimerId, kRenderTimerMs, nullptr);
 
     sync_settings_menu();
+    sync_expansions_menu();
 
     ShowWindow(hwnd_, nCmdShow);
     UpdateWindow(hwnd_);
@@ -345,11 +353,14 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_ERASEBKGND:
             return 1;
         case WM_TIMER:
-            // Check for pending tape requests from the CPU thread.  The
-            // file dialog must be opened on the GUI thread, so the CPU
+            // Check for pending tape / disk requests from the CPU thread.
+            // The file dialog must be opened on the GUI thread, so the CPU
             // thread merely sets a flag and we react here.
             if (app().bus().tape_requested() && !prompting_for_tape_) {
                 cmd_prompt_for_tape();
+            }
+            if (app().bus().disk_requested() && !prompting_for_disk_) {
+                cmd_prompt_for_disk();
             }
             InvalidateRect(hwnd_, nullptr, FALSE);
             if (debugger_window_) debugger_window_->redraw();
@@ -402,7 +413,9 @@ void MainWindow::on_command(WORD id) {
             app().debugger().toggle_pause();
             break;
         case IDM_CPU_STEP:
-            if (app().debugger().is_paused()) app().debugger().request_step();
+            // request_step() pauses + advances one instruction in one shot,
+            // so the prior is_paused() guard is no longer needed.
+            app().debugger().request_step();
             break;
         case IDM_CPU_STEP_OVER:
             if (app().debugger().is_paused()) {
@@ -429,10 +442,9 @@ void MainWindow::on_command(WORD id) {
         case IDM_DEBUGGER_GOTO_MEM:
             cmd_debugger_goto_memory();
             break;
-        case IDM_DEBUGGER_CLEAR_BPS: {
-            auto bps = app().debugger().breakpoints();
-            for (u16 bp : bps) app().debugger().toggle_breakpoint(bp);
-        } break;
+        case IDM_DEBUGGER_CLEAR_BPS:
+            app().debugger().clear_all_breakpoints();
+            break;
         case IDM_VIEW_SCALE_TINY: cmd_set_scale(1); break;
         case IDM_VIEW_SCALE_1X:   cmd_set_scale(2); break;
         case IDM_VIEW_SCALE_2X:   cmd_set_scale(3); break;
@@ -471,6 +483,26 @@ void MainWindow::on_command(WORD id) {
             renderer_.invalidate_colors();
             sync_settings_menu();
             break;
+        case IDM_SETTINGS_DISK_LATCH_BIT:
+            app().settings().set_disk_latch(DiskLatch::Bit);
+            app().bus().disk().set_byte_latch(false);
+            sync_settings_menu();
+            break;
+        case IDM_SETTINGS_DISK_LATCH_BYTE:
+            app().settings().set_disk_latch(DiskLatch::Byte);
+            app().bus().disk().set_byte_latch(true);
+            sync_settings_menu();
+            break;
+
+        case IDM_EXPANSION_RAM_NONE: cmd_set_ram_expansion(RamExpansion::None); break;
+        case IDM_EXPANSION_RAM_8K:   cmd_set_ram_expansion(RamExpansion::K8);   break;
+        case IDM_EXPANSION_RAM_16K:  cmd_set_ram_expansion(RamExpansion::K16);  break;
+        case IDM_EXPANSION_RAM_24K:  cmd_set_ram_expansion(RamExpansion::K24);  break;
+
+        case IDM_EXPANSION_IO_NONE:     cmd_set_io_card(IoCard::None);     break;
+        case IDM_EXPANSION_IO_CASSETTE: cmd_set_io_card(IoCard::Cassette); break;
+        case IDM_EXPANSION_IO_DISK1:    cmd_set_io_card(IoCard::Disk1);    break;
+
         case IDM_HELP_ABOUT:
             cmd_about();
             break;
@@ -501,11 +533,13 @@ void MainWindow::cmd_disk_mount() {
     app().load_file(path);
 
     if (app().bus().disk().mounted()) {
-        char m[MAX_PATH + 64];
-        std::snprintf(m, sizeof(m),
-                      "Mounted: %s\n\nACI tape input is now disabled.",
-                      app().bus().disk().image_path().c_str());
-        MessageBoxA(hwnd_, m, "Disk II", MB_OK | MB_ICONINFORMATION);
+        // Mounting a disk implies the user wants the Disk 1 card live;
+        // auto-select it so the boot ROM and soft switches are mapped.
+        if (app().settings().io_card() != IoCard::Disk1) {
+            cmd_set_io_card(IoCard::Disk1);
+        }
+        // No confirmation dialog - the title bar / debugger window
+        // shows the mounted image, that's feedback enough.
     } else {
         MessageBoxA(hwnd_,
                     "Mount failed. The .dsk image must be exactly 143360 bytes.",
@@ -528,7 +562,7 @@ void MainWindow::cmd_disk_eject() {
     app().bus().disk().eject();
     if (!was_paused) app().debugger().toggle_pause();
 
-    MessageBoxA(hwnd_, "Disk ejected. ACI tape input is re-enabled.",
+    MessageBoxA(hwnd_, "Disk ejected.",
                 "Disk II", MB_OK | MB_ICONINFORMATION);
 }
 
@@ -595,6 +629,90 @@ void MainWindow::cmd_prompt_for_tape() {
     prompting_for_tape_ = false;
 }
 
+void MainWindow::cmd_prompt_for_disk() {
+    prompting_for_disk_ = true;
+
+    // Pause the CPU while the dialog is open so the boot ROM's polling
+    // loop doesn't keep spinning while the user picks a file.
+    bool was_paused = app().debugger().is_paused();
+    if (!was_paused) app().debugger().toggle_pause();
+
+    std::string path = open_file_dialog(hwnd_,
+        L"Disk II image\0*.dsk\0All files\0*.*\0\0",
+        L"Disk 1: Select .dsk image to mount");
+
+    if (path.empty()) {
+        // User cancelled - stop re-prompting until they reselect Disk 1.
+        // Boot ROM will continue spinning at BPL until the user resets
+        // or mounts an image manually.
+        app().bus().set_disk_cancelled();
+        app().bus().clear_disk_request();
+        if (!was_paused) app().debugger().toggle_pause();
+        prompting_for_disk_ = false;
+        return;
+    }
+
+    // load_file routes .dsk to bus.disk().mount_dsk() and pauses the CPU
+    // for the duration; we already paused but it'll just no-op the toggle.
+    app().load_file(path);
+    if (!app().bus().disk().mounted()) {
+        MessageBoxA(hwnd_,
+                    "Mount failed. The .dsk image must be exactly 143360 bytes.",
+                    "Disk 1", MB_OK | MB_ICONERROR);
+        app().bus().set_disk_cancelled();
+    }
+    app().bus().clear_disk_request();
+    if (!was_paused) app().debugger().toggle_pause();
+    prompting_for_disk_ = false;
+}
+
+void MainWindow::sync_expansions_menu() {
+    HMENU m = GetMenu(hwnd_);
+    if (!m) return;
+    auto check = [&](UINT id, bool on) {
+        CheckMenuItem(m, id, MF_BYCOMMAND | (on ? MF_CHECKED : MF_UNCHECKED));
+    };
+    RamExpansion r = app().settings().ram_expansion();
+    check(IDM_EXPANSION_RAM_NONE, r == RamExpansion::None);
+    check(IDM_EXPANSION_RAM_8K,   r == RamExpansion::K8);
+    check(IDM_EXPANSION_RAM_16K,  r == RamExpansion::K16);
+    check(IDM_EXPANSION_RAM_24K,  r == RamExpansion::K24);
+    IoCard c = app().settings().io_card();
+    check(IDM_EXPANSION_IO_NONE,     c == IoCard::None);
+    check(IDM_EXPANSION_IO_CASSETTE, c == IoCard::Cassette);
+    check(IDM_EXPANSION_IO_DISK1,    c == IoCard::Disk1);
+}
+
+void MainWindow::cmd_set_ram_expansion(RamExpansion r) {
+    // Pause the CPU while we change the visible RAM extent so a partial
+    // read can't slip through during the transition.  The backing buffer
+    // itself is always 32KB so no reallocation happens.
+    bool was_paused = app().debugger().is_paused();
+    if (!was_paused) app().debugger().toggle_pause();
+    Sleep(40);
+    app().settings().set_ram_expansion(r);
+    app().bus().set_ram_expansion(r);
+    if (!was_paused) app().debugger().toggle_pause();
+    sync_expansions_menu();
+}
+
+void MainWindow::cmd_set_io_card(IoCard c) {
+    // Same pause-window discipline as cmd_disk_eject - the CPU may be
+    // mid-read inside the soft-switch dispatch.
+    bool was_paused = app().debugger().is_paused();
+    if (!was_paused) app().debugger().toggle_pause();
+    Sleep(40);
+    app().settings().set_io_card(c);
+    app().bus().set_io_card(c);
+    // Reset ACI tape state when switching away from the cassette so the
+    // next time it's selected we don't replay stale flip-flop history.
+    if (c != IoCard::Cassette) app().bus().reset_tape_state();
+    // Re-arm the disk auto-prompt when the user explicitly picks Disk 1.
+    if (c == IoCard::Disk1) app().bus().reset_disk_request_state();
+    if (!was_paused) app().debugger().toggle_pause();
+    sync_expansions_menu();
+}
+
 void MainWindow::sync_settings_menu() {
     HMENU m = GetMenu(hwnd_);
     if (!m) return;
@@ -609,6 +727,13 @@ void MainWindow::sync_settings_menu() {
     check(IDM_SETTINGS_PHOSPHOR_WHITE,   s.phosphor() == Phosphor::White);
     check(IDM_SETTINGS_PHOSPHOR_GREEN,   s.phosphor() == Phosphor::Green);
     check(IDM_SETTINGS_PHOSPHOR_AMBER,   s.phosphor() == Phosphor::Amber);
+    // Radio set: bit-level vs byte-level disk latch.
+    CheckMenuRadioItem(m, IDM_SETTINGS_DISK_LATCH_BIT,
+                          IDM_SETTINGS_DISK_LATCH_BYTE,
+                          s.disk_latch() == DiskLatch::Byte
+                              ? IDM_SETTINGS_DISK_LATCH_BYTE
+                              : IDM_SETTINGS_DISK_LATCH_BIT,
+                          MF_BYCOMMAND);
 }
 
 void MainWindow::cmd_debugger_goto_memory() {

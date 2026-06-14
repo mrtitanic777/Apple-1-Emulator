@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // bus.cpp - memory map dispatch.
 
 #include "bus.h"
@@ -14,6 +18,20 @@ Bus::Bus(const roms::Set& rom_set)
     if (rom_set.aci) {
         aci_rom_ = *rom_set.aci;
     }
+    if (rom_set.onedos) {
+        onedos_rom_ = *rom_set.onedos;
+    }
+}
+
+void Bus::set_ram_expansion(RamExpansion r) {
+    std::size_t extent = 0x2000;
+    switch (r) {
+        case RamExpansion::None: extent = 0x2000; break;
+        case RamExpansion::K8:   extent = 0x4000; break;
+        case RamExpansion::K16:  extent = 0x6000; break;
+        case RamExpansion::K24:  extent = 0x8000; break;
+    }
+    ram_extent_.store(extent);
 }
 
 void Bus::poll_keyboard() {
@@ -100,19 +118,61 @@ u8 Bus::read_tape() {
 }
 
 u8 Bus::read(u16 addr) {
-    if (addr < 0x2000)                          return ram_[addr];
+    // Disk-1 card RAM at $2000-$2FFF takes priority over both stock
+    // RAM (which only extends to $1FFF anyway) and any RAM expansion
+    // bytes covering the same range, so One Dos always lives at the
+    // same physical place regardless of what else is installed.
+    if (addr >= 0x2000 && addr <= 0x2FFF
+        && static_cast<IoCard>(io_card_.load()) == IoCard::Disk1) {
+        return disk1_ram_[addr - 0x2000];
+    }
+    if (addr < ram_extent_.load())              return ram_[addr];
     if (addr >= 0xE000 && addr <= 0xEFFF) {
         return basic_ram_.empty() ? 0x00 : basic_ram_[addr - 0xE000];
     }
-    if (addr >= 0xC100 && addr <= 0xC1FF) {
-        return aci_rom_.empty() ? 0x00 : aci_rom_[addr - 0xC100];
+    const auto card = static_cast<IoCard>(io_card_.load());
+    if (addr >= 0xC100 && addr <= 0xC2FF) {
+        // IO-card ROM window.
+        // Cassette card: 256-byte ACI ROM at $C100-$C1FF.  $C200-$C2FF
+        //   is unmapped on this card.
+        // Disk 1 card: 512-byte OneDos ROM split as
+        //   $C100-$C1FF -> boot loader code
+        //   $C200-$C2FF -> NIBTAB (6-and-2 GCR inverse table)
+        if (card == IoCard::Cassette) {
+            if (addr >= 0xC200) return 0x00;
+            return aci_rom_.empty() ? 0x00 : aci_rom_[addr - 0xC100];
+        }
+        if (card == IoCard::Disk1) {
+            const std::size_t off = addr - 0xC100;
+            return (off < onedos_rom_.size()) ? onedos_rom_[off] : 0x00;
+        }
+        return 0x00;
     }
     if (addr >= 0xC000 && addr <= 0xC0FF) {
-        // Disk II takes over $C000-$C0FF whenever an image is mounted.
-        // The eight 16-byte soft-switch banks all decode to the same
-        // switches; we mask the low 4 bits inside DiskII::read.
-        if (disk_.mounted())                    return disk_.read(addr);
-        return read_tape();
+        if (card == IoCard::Cassette) {
+            return read_tape();
+        }
+        if (card == IoCard::Disk1) {
+            // Disk II only decodes the low 4 bits ($C000-$C00F); the rest
+            // of $C0xx is unmapped on this card.  DiskII::read handles
+            // the soft-switch toggle and returns the data register.
+            if ((addr & 0x00F0) == 0x0000) {
+                // Auto-prompt: if the OneDos boot ROM is polling for a
+                // nibble and there's no image mounted, ask the GUI thread
+                // to pop a .dsk file dialog.  Same trigger condition the
+                // tape side uses (PC inside the IO ROM window).
+                if (!disk_.mounted() && !disk_cancelled_.load()
+                    && cpu_ != nullptr) {
+                    u16 pc = cpu_->pc();
+                    if (pc >= 0xC100 && pc <= 0xC1FF) {
+                        disk_requested_.store(true);
+                    }
+                }
+                return disk_.read(addr);
+            }
+            return 0x00;
+        }
+        return 0x00;
     }
     if (addr >= 0xD000 && addr <= 0xD0FF)       return read_pia(addr);
     if (addr >= 0xFF00)                         return wozmon_rom_[addr - 0xFF00];
@@ -120,7 +180,12 @@ u8 Bus::read(u16 addr) {
 }
 
 void Bus::write(u16 addr, u8 val) {
-    if (addr < 0x2000) { ram_[addr] = val; return; }
+    if (addr >= 0x2000 && addr <= 0x2FFF
+        && static_cast<IoCard>(io_card_.load()) == IoCard::Disk1) {
+        disk1_ram_[addr - 0x2000] = val;
+        return;
+    }
+    if (addr < ram_extent_.load()) { ram_[addr] = val; return; }
     if (addr >= 0xE000 && addr <= 0xEFFF) {
         if (!basic_ram_.empty()) basic_ram_[addr - 0xE000] = val;
         return;
@@ -130,7 +195,10 @@ void Bus::write(u16 addr, u8 val) {
         // Writes to soft switches act as toggles too (real hardware
         // strobes the same line on R/W).  Drop the value; only the
         // address matters.
-        if (disk_.mounted()) disk_.write(addr, val);
+        if (static_cast<IoCard>(io_card_.load()) == IoCard::Disk1
+            && (addr & 0x00F0) == 0x0000) {
+            disk_.write(addr, val);
+        }
         return;
     }
     // ROM and unmapped writes are silently dropped.
@@ -139,12 +207,25 @@ void Bus::write(u16 addr, u8 val) {
 u8 Bus::peek(u16 addr) const {
     // Read with no side effects.  Returns RAM/ROM contents directly; for
     // I/O regions returns 0 (since values there are dynamic / stateful).
-    if (addr < 0x2000)                          return ram_[addr];
+    if (addr >= 0x2000 && addr <= 0x2FFF
+        && static_cast<IoCard>(io_card_.load()) == IoCard::Disk1) {
+        return disk1_ram_[addr - 0x2000];
+    }
+    if (addr < ram_extent_.load())              return ram_[addr];
     if (addr >= 0xE000 && addr <= 0xEFFF) {
         return basic_ram_.empty() ? 0x00 : basic_ram_[addr - 0xE000];
     }
-    if (addr >= 0xC100 && addr <= 0xC1FF) {
-        return aci_rom_.empty() ? 0x00 : aci_rom_[addr - 0xC100];
+    const auto card = static_cast<IoCard>(io_card_.load());
+    if (addr >= 0xC100 && addr <= 0xC2FF) {
+        if (card == IoCard::Cassette) {
+            if (addr >= 0xC200) return 0x00;
+            return aci_rom_.empty() ? 0x00 : aci_rom_[addr - 0xC100];
+        }
+        if (card == IoCard::Disk1) {
+            const std::size_t off = addr - 0xC100;
+            return (off < onedos_rom_.size()) ? onedos_rom_[off] : 0x00;
+        }
+        return 0x00;
     }
     if (addr >= 0xFF00)                         return wozmon_rom_[addr - 0xFF00];
     return 0x00;

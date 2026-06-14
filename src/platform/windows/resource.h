@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // resource.h - menu / accelerator IDs shared between resource.rc and code.
 
 #pragma once
@@ -44,6 +48,17 @@
 #define IDM_SETTINGS_PHOSPHOR_WHITE    710
 #define IDM_SETTINGS_PHOSPHOR_GREEN    711
 #define IDM_SETTINGS_PHOSPHOR_AMBER    712
+#define IDM_SETTINGS_DISK_LATCH_BIT    720
+#define IDM_SETTINGS_DISK_LATCH_BYTE   721
+
+// Expansions menu
+#define IDM_EXPANSION_RAM_NONE         800
+#define IDM_EXPANSION_RAM_8K           801
+#define IDM_EXPANSION_RAM_16K          802
+#define IDM_EXPANSION_RAM_24K          803
+#define IDM_EXPANSION_IO_NONE          810
+#define IDM_EXPANSION_IO_CASSETTE      811
+#define IDM_EXPANSION_IO_DISK1         812
 
 // Help menu
 #define IDM_HELP_ABOUT             601
@@ -51,3 +66,4 @@
 // Resources
 #define IDR_MAIN_MENU              1000
 #define IDR_MAIN_ACCEL             900
+#define IDI_APPICON                1100

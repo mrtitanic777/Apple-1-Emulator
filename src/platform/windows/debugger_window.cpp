@@ -1,7 +1,14 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // debugger_window.cpp
 
 #include "debugger_window.h"
+#include "breakpoints_dialog.h"
 #include "app.h"
+#include "resource.h"
+#include <windowsx.h>           // GET_X_LPARAM / GET_Y_LPARAM
 
 namespace apple1::win {
 
@@ -18,6 +25,8 @@ bool DebuggerWindow::create(HINSTANCE hInstance, HWND parent) {
     wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = nullptr;        // D2D handles painting
     wc.lpszClassName = kClassName;
+    wc.hIcon   = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APPICON));
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APPICON));
     RegisterClassExW(&wc);
 
     hwnd_ = CreateWindowExW(
@@ -76,6 +85,32 @@ LRESULT DebuggerWindow::handle(UINT msg, WPARAM wParam, LPARAM lParam) {
             BeginPaint(hwnd_, &ps);
             renderer_.render(app().cpu(), app().bus(), app().debugger());
             EndPaint(hwnd_, &ps);
+            return 0;
+        }
+        case WM_LBUTTONDOWN: {
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            switch (renderer_.hit_test(x, y)) {
+                case DebugButton::ModeFree:
+                    app().debugger().request_run_free();
+                    break;
+                case DebugButton::ModeStep:
+                    app().debugger().request_pause();
+                    break;
+                case DebugButton::ModeRunRTS:
+                    app().debugger().request_run_to_rts();
+                    break;
+                case DebugButton::StepNow:
+                    app().debugger().request_step();
+                    break;
+                case DebugButton::AddBreakpoint:
+                    BreakpointsDialog::run(hwnd_, app().debugger());
+                    break;
+                case DebugButton::None:
+                default:
+                    return 0;
+            }
+            InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         case WM_ERASEBKGND:

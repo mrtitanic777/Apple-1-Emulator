@@ -1,3 +1,7 @@
+// Contributor: Phillip Allison (github.com/philtimmes)
+// This file includes changes Phillip contributed to the Apple-1 Emulator.
+// See CONTRIBUTORS.md for the full list of his work.
+
 // debugger_renderer.cpp
 
 #include "debugger_renderer.h"
@@ -98,6 +102,44 @@ void DebuggerRenderer::draw_text(const wchar_t* s, float x, float y) {
                        D2D1_DRAW_TEXT_OPTIONS_NONE);
 }
 
+float DebuggerRenderer::draw_button(DebugButton id, const wchar_t* label,
+                                    float x, float y, float w, bool active) {
+    constexpr float h   = 22.0f;
+    constexpr float gap = 6.0f;
+    D2D1_RECT_F r = D2D1::RectF(x, y, x + w, y + h);
+
+    auto* outline = active ? brush_accent_.get() : brush_dim_.get();
+    target_->DrawRectangle(r, outline, active ? 1.6f : 1.0f);
+
+    // Centred label.  We size a one-line rect at the button's vertical
+    // midline; D2D handles the horizontal centering via DWRITE alignment.
+    auto* fmt = active ? bold_format_.get() : text_format_.get();
+    DWRITE_TEXT_ALIGNMENT old_align = fmt->GetTextAlignment();
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    D2D1_RECT_F text_rect = D2D1::RectF(x, y + (h - line_h_) * 0.5f,
+                                        x + w, y + h);
+    target_->DrawTextW(label, static_cast<UINT32>(wcslen(label)), fmt,
+                       text_rect,
+                       active ? brush_accent_.get() : brush_text_.get(),
+                       D2D1_DRAW_TEXT_OPTIONS_NONE);
+    fmt->SetTextAlignment(old_align);
+
+    buttons_.push_back({ id, r });
+    return x + w + gap;
+}
+
+DebugButton DebuggerRenderer::hit_test(int x, int y) const {
+    const float fx = static_cast<float>(x);
+    const float fy = static_cast<float>(y);
+    for (const auto& b : buttons_) {
+        if (fx >= b.rect.left && fx <= b.rect.right &&
+            fy >= b.rect.top  && fy <= b.rect.bottom) {
+            return b.id;
+        }
+    }
+    return DebugButton::None;
+}
+
 // Convert UTF-8 ASCII string to wide.  We only ever pass ASCII so this is
 // a straight widening.
 static std::wstring widen(const char* s) {
@@ -112,6 +154,9 @@ void DebuggerRenderer::render(const CPU6502& cpu, const Bus& bus,
 
     target_->BeginDraw();
     target_->Clear(D2D1::ColorF(0.04f, 0.04f, 0.04f, 1.0f));
+
+    // Reset hit regions; draw_button() repopulates as it lays out.
+    buttons_.clear();
 
     char line[128];
     float y = kPadY;
@@ -135,6 +180,27 @@ void DebuggerRenderer::render(const CPU6502& cpu, const Bus& bus,
     std::snprintf(line, sizeof(line), "  STATUS:  %s",
                   dbg.is_paused() ? "PAUSED" : "RUNNING");
     draw_accent(line);
+
+    // Run-mode buttons.  The active mode highlights in the accent colour.
+    // STEP NOW is always available - in Step mode it advances one
+    // instruction; outside Step mode it still single-steps (then leaves
+    // the prior mode's intent in place).
+    RunMode mode = dbg.current_mode();
+    float bx = kPadX;
+    bx = draw_button(DebugButton::ModeFree,   L"FREE",   bx, y,  72.0f,
+                     mode == RunMode::Free);
+    bx = draw_button(DebugButton::ModeStep,   L"PAUSE",  bx, y,  72.0f,
+                     mode == RunMode::Step);
+    bx = draw_button(DebugButton::ModeRunRTS, L"TO RTS", bx, y,  72.0f,
+                     mode == RunMode::RunToRTS);
+    bx += 12.0f;       // visual gap between mode group and action button
+    // STEP advances exactly one CPU instruction every click, regardless
+    // of the current mode (it pauses on entry if not already paused).
+    bx = draw_button(DebugButton::StepNow, L"STEP", bx, y, 88.0f, false);
+    bx += 12.0f;
+    // ADD BP opens the Breakpoints modal (Add/Disable/Enable/Delete).
+    draw_button(DebugButton::AddBreakpoint, L"ADD BP...", bx, y, 96.0f, false);
+    y += 22.0f + 4.0f;
     next_line();
 
     // Registers
@@ -204,6 +270,70 @@ void DebuggerRenderer::render(const CPU6502& cpu, const Bus& bus,
                   "  $C0xx READS:  %llu",
                   static_cast<unsigned long long>(bus.tape_reads()));
     draw_line(line);
+    next_line();
+
+    // Disk II diagnostics - shows the latched nibble at $C00C (Q6L) the
+    // CPU saw at its most recent read.  Refreshes ~30Hz so a running
+    // boot loop visibly cycles through the GCR stream.
+    draw_accent("  DISK");
+    const auto& disk = bus.disk();
+    if (disk.mounted()) {
+        // Single atomic snapshot - the CPU thread is racing alongside,
+        // and reading the fields one at a time produces stitched-up
+        // impossible state (e.g. byte_bit_index=7 with shift_reg=$00).
+        auto s = disk.snapshot_head();
+        std::snprintf(line, sizeof(line),
+                      "  STREAM:  %02X %02X %02X [%02X] %02X %02X %02X",
+                      s.stream[0], s.stream[1], s.stream[2], s.stream[3],
+                      s.stream[4], s.stream[5], s.stream[6]);
+        draw_line(line);
+        std::snprintf(line, sizeof(line),
+                      "  LATCH:   $%02X   bit %d/8 of source   next-bit:[%u]",
+                      s.shift_reg, s.byte_bit_index,
+                      static_cast<unsigned>(s.next_bit));
+        draw_line(line);
+    }
+    if (!disk.mounted()) {
+        draw_line("  STATUS:       (no image mounted)");
+    } else {
+        std::snprintf(line, sizeof(line),
+                      "  STATUS:       MOUNTED   MOTOR: %s   DRIVE: %d",
+                      disk.motor_on() ? "ON " : "OFF", disk.drive());
+        draw_line(line);
+        std::snprintf(line, sizeof(line),
+                      "  TRACK:        %2d        HALF: %2d",
+                      disk.track(), disk.half_track());
+        draw_line(line);
+        const char* disk_mode = !disk.q7_high()
+                                ? (disk.q6_high() ? "READ-LOAD"  : "READ-SHIFT")
+                                : (disk.q6_high() ? "WRITE-LOAD" : "WRITE-SHIFT");
+        std::snprintf(line, sizeof(line),
+                      "  MODE:         %s",
+                      disk_mode);
+        draw_line(line);
+        // Advance-per-read model: data_reg_ holds the byte the CPU
+        // most-recently consumed from $C00C, and the head is sitting on
+        // the byte that the NEXT read will return.
+        u8   nib = disk.data_reg();
+        char ch  = (nib >= 0x20 && nib < 0x7F) ? static_cast<char>(nib) : '.';
+        std::snprintf(line, sizeof(line),
+                      "  LATCH:        $%02X  '%c'  (bin %c%c%c%c%c%c%c%c)",
+                      nib, ch,
+                      (nib & 0x80) ? '1':'0', (nib & 0x40) ? '1':'0',
+                      (nib & 0x20) ? '1':'0', (nib & 0x10) ? '1':'0',
+                      (nib & 0x08) ? '1':'0', (nib & 0x04) ? '1':'0',
+                      (nib & 0x02) ? '1':'0', (nib & 0x01) ? '1':'0');
+        draw_line(line);
+        std::snprintf(line, sizeof(line),
+                      "  HEAD:         %zu / %zu  (next byte to be read)",
+                      disk.head_position(),
+                      apple1::DiskII::nibbles_per_track());
+        draw_line(line);
+        std::snprintf(line, sizeof(line),
+                      "  DISK TIME:    %llu us",
+                      static_cast<unsigned long long>(disk.head_micros()));
+        draw_line(line);
+    }
 
     HRESULT hr = target_->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) release_device_resources();
