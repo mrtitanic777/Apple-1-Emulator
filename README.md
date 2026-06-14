@@ -112,14 +112,19 @@ it under **Expansions → IO Card**:
 1. **Disk II → Mount .dsk…** (or **F3**), or just pick **Expansions → IO Card →
    Disk 1** and you'll be prompted for an image. Mounting a disk automatically
    switches the IO card to Disk 1.
-2. The disk boots. **Writes are saved back to the `.dsk` file**, so files you
-   create in the guest OS persist.
+2. From WozMon, type `C100R` to boot the disk's OS (OneDOS on the bundled
+   image). **Writes are saved back to the `.dsk` file**, so files you create
+   persist.
 3. The last disk you mounted **auto-mounts on the next launch** (unless the
    Cassette card is selected). **Disk II → Eject** unmounts.
 
 If disk reads are unreliable on your machine (some host schedulers are
 timing-sensitive), switch **Settings → Disk II Latch** from *Bit-level* to
 *Byte-level* for deterministic timing.
+
+**Full OneDOS command reference** — booting, `CAT`, `BLOAD`/`BRUN`/`BSAVE`,
+rename/delete/format, the sysdisk menu, and the call API — is in the
+**[OneDOS User Guide](ONEDOS.md)**.
 
 ### Cassettes (ACI)
 
